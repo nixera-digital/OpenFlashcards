@@ -1,0 +1,25 @@
+# ── OpenFlashcards – local development image (hot reload) ───────────────────
+# Used by: docker compose -f docker-compose.dev.yml up --build
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm install && npm cache clean --force
+
+# Source is bind-mounted in compose; copy once so the image still boots alone
+COPY src/     ./src/
+COPY public/  ./public/
+COPY scripts/ ./scripts/
+
+RUN mkdir -p /app/data /app/config
+
+ENV NODE_ENV=development \
+  PORT=8000 \
+  DATA_DIR=/app/data \
+  CONFIG_DIR=/app/config
+
+EXPOSE 8000
+
+CMD ["node", "--watch", "src/server.js"]

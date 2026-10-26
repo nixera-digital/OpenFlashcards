@@ -1,0 +1,40 @@
+# Developer stack (hot reload via node --watch)
+#
+#   docker compose -f docker-compose.dev.yml up --build
+#   # or: npm run docker:dev
+#
+# App: http://localhost:8000  (admin / admin)
+
+name: openflashcards-dev
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    ports:
+      - "${PORT:-8000}:8000"
+    env_file:
+      - path: .env.example
+        required: false
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: development
+      PORT: 8000
+      DATA_DIR: /app/data
+      CONFIG_DIR: /app/config
+      JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me}
+    volumes:
+      # Live source — edit on host, node --watch restarts in the container
+      - ./src:/app/src
+      - ./public:/app/public
+      - ./data:/app/data
+      - ./config:/app/config
+      # Keep container node_modules off the Windows bind mount
+      - web_node_modules_dev:/app/node_modules
+    stdin_open: true
+    tty: true
+
+volumes:
+  web_node_modules_dev:

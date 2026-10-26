@@ -1,0 +1,46 @@
+# Production stack
+#
+#   cp .env.example .env   # set JWT_SECRET
+#   docker compose up --build -d
+#   # or: npm run docker:up
+#
+# App: http://localhost:8000  (admin / admin — change password!)
+#
+# Data lives on the host under ./data and ./config (easy backup).
+# Bind only to localhost by default — open LAN with APP_LISTEN=0.0.0.0 in .env.
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: openflashcards
+    ports:
+      # Bind only to localhost by default — public IP is never exposed.
+      # For LAN / phone testing: APP_LISTEN=0.0.0.0 in .env
+      - "${APP_LISTEN:-127.0.0.1}:${PORT:-8000}:8000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: production
+      PORT: 8000
+      DATA_DIR: /app/data
+      CONFIG_DIR: /app/config
+      JWT_SECRET: ${JWT_SECRET:-change_this_to_a_random_secret}
+    volumes:
+      - ./data:/app/data
+      - ./config:/app/config
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:8000/').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
