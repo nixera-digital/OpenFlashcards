@@ -6,11 +6,8 @@
 A lightweight, modern flashcard app designed for efficient language learning, based on the words and phrases you want to learn and master — simple, fast and self-hostable with Docker.
 
 <p align="center">
-  <a href="https://github.com/Liozon/OpenFlashcards/releases/latest">
-    <img alt="GitHub latest version" src="https://img.shields.io/github/v/release/Liozon/OpenFlashcards?display_name=release&logo=github&label=Latest%20version&color=%230FBF3E">
-  </a>
-  <a href="https://hub.docker.com/r/liozon/openflashcards">
-    <img alt="Docker latest version" src="https://img.shields.io/docker/v/liozon/openflashcards?logo=docker&logoColor=white&label=Latest%20version&color=%232560ff">
+  <a href="https://github.com/nixera-digital/OpenFlashcards/releases/latest">
+    <img alt="GitHub latest version" src="https://img.shields.io/github/v/release/nixera-digital/OpenFlashcards?display_name=release&logo=github&label=Latest%20version&color=%230FBF3E">
   </a>
 </p>
 
@@ -132,27 +129,27 @@ data/
 
 ---
 
-## Quick start (get it from Docker Hub)
+## Quick start (Docker Compose)
 
 1. Download Docker Desktop: https://www.docker.com/products/docker-desktop
-2. Launch **Docker Desktop**
-3. In the search bar, type `liozon/openflashcards` and click on **Run**
-![alt text](<images/Docker image search.png>)
-4. Map the **container port 8000** to your **local port 8000** and click **Run**
-![alt text](<images/Docker port config.png>)
-5. Open a browser and go to **http://localhost:8000**
-6. Connect to the app with the default admin credentials:
-   * Username: `admin`
-   * Password: `admin`
-   > ⚠️ Change the default password immediately after logging in!
-7. Create new users and start learning!
+2. Clone and start:
+
+```bash
+git clone https://github.com/nixera-digital/OpenFlashcards.git
+cd OpenFlashcards
+cp .env.example .env   # set JWT_SECRET
+docker compose up --build -d
+```
+
+3. Open **http://localhost:8000**
+4. Default login: `admin` / `admin` — change the password immediately!
 
 ---
 
 ## Quick start (local)
 
 ```bash
-git clone https://github.com/Liozon/OpenFlashcards.git
+git clone https://github.com/nixera-digital/OpenFlashcards.git
 cd OpenFlashcards
 npm install
 node src/server.js
@@ -161,22 +158,13 @@ node src/server.js
 
 ---
 
-## Quick start (build for docker)
+## Quick start (build Docker image)
 
 ```bash
-git clone https://github.com/Liozon/OpenFlashcards.git
+git clone https://github.com/nixera-digital/OpenFlashcards.git
 cd OpenFlashcards
-npm install
-cd scripts/
-chmod +x build-and-export.sh
-./build-and-export.sh
-# This creates `Docker.OpenFlashcards.vlatest.tar.gz`.
-
-docker run -d \
-  --name openflashcards \
-  --restart unless-stopped \
-  -p 8000:8000 \
-  openflashcards
+docker compose up --build -d
+# or: npm run docker:up
 # Open http://localhost:8000
 ```
 

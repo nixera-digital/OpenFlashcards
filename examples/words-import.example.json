@@ -1,0 +1,76 @@
+{
+  "levels": ["A1", "A2", "B1"],
+  "topics": [
+    { "name": "Їжа", "color": "#e67e22" },
+    { "name": "Подорожі", "color": "#2563eb" },
+    { "name": "Дім", "color": "#439b00" }
+  ],
+  "words": [
+    {
+      "type": "noun",
+      "literal": "apple",
+      "translation": "яблуко",
+      "definition": "a round fruit",
+      "article": "an",
+      "level": "A1",
+      "topics": ["Їжа"]
+    },
+    {
+      "type": "noun",
+      "literal": "bread",
+      "translation": "хліб",
+      "level": "A1",
+      "topics": ["Їжа", "Дім"]
+    },
+    {
+      "type": "verb",
+      "literal": "travel",
+      "translation": "подорожувати",
+      "infinitive": "to travel",
+      "level": "A2",
+      "topics": ["Подорожі"]
+    },
+    {
+      "type": "adjective",
+      "literal": "hungry",
+      "translation": "голодний",
+      "level": "A1",
+      "topics": ["Їжа"]
+    },
+    {
+      "type": "adverb",
+      "literal": "quickly",
+      "translation": "швидко",
+      "level": "A2",
+      "topics": ["Подорожі"]
+    },
+    {
+      "type": "other",
+      "literal": "hello",
+      "translation": "привіт",
+      "level": "A1",
+      "topics": ["Подорожі"]
+    }
+  ],
+  "phrases": [
+    {
+      "text": "How much is it?",
+      "translation": "Скільки це коштує?",
+      "helpNote": "у магазині",
+      "level": "A1",
+      "topics": ["Подорожі"]
+    },
+    {
+      "text": "I'm hungry",
+      "translation": "Я голодний",
+      "level": "A1",
+      "topics": ["Їжа"]
+    },
+    {
+      "text": "Could you help me find the station?",
+      "translation": "Чи можете допомогти знайти вокзал?",
+      "level": "B1",
+      "topics": ["Подорожі"]
+    }
+  ]
+}

@@ -13,6 +13,7 @@ function normConj(entry) {
 let _trainMode = 'word';
 let _trainTypes = [];
 let _trainLabels = [];
+let _trainLevels = [];
 let _trainDirection = 'random';
 let _trainOrder = 'random';        // 'random' | 'sequential'
 let _trainSortDir = 'desc';        // 'desc' (newest first) | 'asc' (oldest first)
@@ -43,42 +44,48 @@ function _shuffle(arr) {
   return arr;
 }
 
+function _trainFilterParams() {
+  const labelsParam = _trainLabels.length ? '&labels=' + _trainLabels.join(',') : '';
+  const levelsParam = _trainLevels.length ? '&levels=' + _trainLevels.join(',') : '';
+  return labelsParam + levelsParam;
+}
+
 async function _refillWordQueue(dir) {
   const lang = currentLang();
   const dirMap = { 'random': 'random', 'native→target': 'native', 'target→native': 'target' };
   const apiDir = dir ? 'native' : (dirMap[_trainDirection] || 'random');
   const typesParam = _trainTypes.length ? '&types=' + _trainTypes.join(',') : '';
-  const labelsParam = _trainLabels.length ? '&labels=' + _trainLabels.join(',') : '';
+  const filterParam = _trainFilterParams();
   const orderParam = _trainOrder === 'sequential' ? '&order=sequential&sortDir=' + _trainSortDir : '';
-  const result = await api('GET', '/api/quiz/batch?lang=' + encodeURIComponent(lang) + '&count=500&direction=' + apiDir + typesParam + labelsParam + orderParam + _dateParams());
+  const result = await api('GET', '/api/quiz/batch?lang=' + encodeURIComponent(lang) + '&count=500&direction=' + apiDir + typesParam + filterParam + orderParam + _dateParams());
   _trainWordQueue = result.questions || [];
 }
 
 async function _refillPhraseQueue() {
   const lang = currentLang();
-  const labelsParam = _trainLabels.length ? '&labels=' + _trainLabels.join(',') : '';
+  const filterParam = _trainFilterParams();
   const orderParam = _trainOrder === 'sequential' ? '&order=sequential&sortDir=' + _trainSortDir : '';
-  const result = await api('GET', '/api/quiz/phrase/batch?lang=' + encodeURIComponent(lang) + '&count=500' + labelsParam + orderParam + _dateParams());
+  const result = await api('GET', '/api/quiz/phrase/batch?lang=' + encodeURIComponent(lang) + '&count=500' + filterParam + orderParam + _dateParams());
   _trainPhraseQueue = result.questions || [];
 }
 
 async function _refillAutoQueue() {
   const lang = currentLang();
   const typesParam = _trainTypes.length ? '&types=' + _trainTypes.join(',') : '';
-  const labelsParam = _trainLabels.length ? '&labels=' + _trainLabels.join(',') : '';
+  const filterParam = _trainFilterParams();
   const orderParam = _trainOrder === 'sequential' ? '&order=sequential&sortDir=' + _trainSortDir : '';
   const wordCount = 500;
   const phraseCount = 500;
   if (_trainAutoContent === 'phrases') {
-    const result = await api('GET', '/api/quiz/phrase/batch?lang=' + encodeURIComponent(lang) + '&count=' + phraseCount + labelsParam + orderParam + _dateParams());
+    const result = await api('GET', '/api/quiz/phrase/batch?lang=' + encodeURIComponent(lang) + '&count=' + phraseCount + filterParam + orderParam + _dateParams());
     _trainAutoQueue = (result.questions || []).map(q => ({ ...q, _type: 'phrase' }));
   } else if (_trainAutoContent === 'words') {
-    const result = await api('GET', '/api/quiz/batch?lang=' + encodeURIComponent(lang) + '&count=' + wordCount + '&direction=random' + typesParam + labelsParam + orderParam + _dateParams());
+    const result = await api('GET', '/api/quiz/batch?lang=' + encodeURIComponent(lang) + '&count=' + wordCount + '&direction=random' + typesParam + filterParam + orderParam + _dateParams());
     _trainAutoQueue = (result.questions || []).map(q => ({ ...q, _type: 'word' }));
   } else {
     const [wordRes, phraseRes] = await Promise.all([
-      api('GET', '/api/quiz/batch?lang=' + encodeURIComponent(lang) + '&count=' + wordCount + '&direction=random' + typesParam + labelsParam + orderParam + _dateParams()).catch(() => ({ questions: [] })),
-      api('GET', '/api/quiz/phrase/batch?lang=' + encodeURIComponent(lang) + '&count=' + phraseCount + labelsParam + orderParam + _dateParams()).catch(() => ({ questions: [] }))
+      api('GET', '/api/quiz/batch?lang=' + encodeURIComponent(lang) + '&count=' + wordCount + '&direction=random' + typesParam + filterParam + orderParam + _dateParams()).catch(() => ({ questions: [] })),
+      api('GET', '/api/quiz/phrase/batch?lang=' + encodeURIComponent(lang) + '&count=' + phraseCount + filterParam + orderParam + _dateParams()).catch(() => ({ questions: [] }))
     ]);
     const words = (wordRes.questions || []).map(q => ({ ...q, _type: 'word' }));
     const phrases = (phraseRes.questions || []).map(q => ({ ...q, _type: 'phrase' }));
@@ -191,7 +198,7 @@ function renderTrain(el) {
 
   stopAutoTimer();
   _trainCorrect = 0; _trainWrong = 0; _trainStreak = 0;
-  _trainTypes = []; _trainLabels = []; _trainMode = 'flashcards'; _trainDirection = 'random';
+  _trainTypes = []; _trainLabels = []; _trainLevels = []; _trainMode = 'flashcards'; _trainDirection = 'random';
   _trainOrder = 'random'; _trainSortDir = 'desc'; _trainSeenIds = new Set();
   _trainDateFrom = ''; _trainDateTo = '';
 
@@ -242,6 +249,9 @@ function renderTrain(el) {
 
     // ── 3. Labels ──
     '<div class="filter-row" id="labelFilters"></div>' +
+
+    // ── 3b. Levels ──
+    '<div class="filter-row" id="levelFilters"></div>' +
 
     // ── 4. Date filter ──
     '<div id="dateFilters" style="display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;margin-bottom:20px">' +
@@ -344,6 +354,7 @@ function renderTrain(el) {
   });
 
   _populateLabelFilters(lang);
+  _populateLevelFilters(lang);
 
   // Apply initial flashcard mode visibility
   const autoBtn = document.getElementById('modeAuto');
@@ -398,6 +409,47 @@ async function _populateLabelFilters(lang) {
   });
 }
 
+function _refreshLevelStyles() {
+  document.querySelectorAll('#levelFilters .type-btn[data-color]').forEach(btn => {
+    const color = btn.dataset.color;
+    if (btn.classList.contains('active')) {
+      btn.style.background = color;
+      btn.style.color = _textColorForBg(color);
+      btn.style.borderColor = color;
+    } else {
+      btn.style.background = color + '20';
+      btn.style.color = color;
+      btn.style.borderColor = color;
+    }
+  });
+}
+
+async function _populateLevelFilters(lang) {
+  let levels = [];
+  try { levels = await api('GET', '/api/levels?lang=' + encodeURIComponent(lang)); } catch { }
+  const row = document.getElementById('levelFilters');
+  if (!row) return;
+  row.innerHTML = '';
+  if (!levels.length) { row.style.display = 'none'; return; }
+  row.style.display = '';
+  const allBtn = document.createElement('button');
+  allBtn.className = 'type-btn active';
+  allBtn.dataset.levelId = '';
+  allBtn.innerHTML = window.phIcon('target') + ' ' + esc(t('train_levels_filter'));
+  allBtn.addEventListener('click', () => toggleLevelFilter('', allBtn));
+  row.appendChild(allBtn);
+  levels.forEach(lv => {
+    const btn = document.createElement('button');
+    btn.className = 'type-btn';
+    btn.dataset.levelId = lv.id;
+    btn.dataset.color = lv.color;
+    btn.style.cssText = `background:${lv.color}20;border-color:${lv.color};color:${lv.color};font-weight:600`;
+    btn.textContent = lv.code || lv.name;
+    btn.addEventListener('click', () => toggleLevelFilter(lv.id, btn));
+    row.appendChild(btn);
+  });
+}
+
 // ── Start training ─────────────────────────────────────────────────────────────
 window.startTraining = function () {
   _trainSessionStarted = true;
@@ -444,6 +496,8 @@ window.setTrainMode = function (mode, btn) {
   if (sortRow) sortRow.style.display = _trainOrder === 'sequential' ? '' : 'none';
   const lf = document.getElementById('labelFilters');
   if (lf && lf.children.length) lf.style.display = (isWord || isWriting || isPhrase || isMixed || isAuto) ? '' : 'none';
+  const lv = document.getElementById('levelFilters');
+  if (lv && lv.children.length) lv.style.display = (isWord || isWriting || isPhrase || isMixed || isAuto) ? '' : 'none';
   if (isAuto) {
     _trainAutoStarted = false;
     _loadFlashcardSettings();
@@ -475,6 +529,27 @@ window.toggleLabelFilter = function (labelId, btn) {
     }
   }
   _refreshLabelStyles();
+  _resetQueues();
+  if (_trainSessionStarted) loadQuestion();
+};
+
+window.toggleLevelFilter = function (levelId, btn) {
+  if (levelId === '') {
+    _trainLevels = [];
+    document.querySelectorAll('#levelFilters .type-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+  } else {
+    document.querySelector('#levelFilters .type-btn[data-level-id=""]').classList.remove('active');
+    btn.classList.toggle('active');
+    const active = [...document.querySelectorAll('#levelFilters .type-btn.active')]
+      .map(b => b.dataset.levelId).filter(Boolean);
+    _trainLevels = active;
+    if (!active.length) {
+      _trainLevels = [];
+      document.querySelector('#levelFilters .type-btn[data-level-id=""]').classList.add('active');
+    }
+  }
+  _refreshLevelStyles();
   _resetQueues();
   if (_trainSessionStarted) loadQuestion();
 };

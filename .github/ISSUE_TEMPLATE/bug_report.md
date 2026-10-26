@@ -3,7 +3,7 @@ name: Bug report
 about: Create a report to help us improve OpenFlashcards
 title: 'BUG - '
 labels: bug
-assignees: Liozon
+assignees: ''
 type: Bug
 
 ---

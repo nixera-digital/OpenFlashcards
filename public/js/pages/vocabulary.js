@@ -40,6 +40,7 @@ let _vocabPhrases = [];
 let _vocabFilter = '';
 let _vocabSearch = '';
 let _vocabLabel = '';   // filter by label id
+let _vocabLevel = '';   // filter by level id
 let _vocabMastered = false; // filter only mastered items
 
 // ── Duplicates mode ──────────────────────────────────────────────────────────
@@ -75,6 +76,7 @@ async function renderVocabulary(el, params) {
       </div>
       <button class="btn btn-sm btn-secondary" id="dupFindBtn" style="margin-top:6px;font-size:.82rem" onclick="findDuplicates()">${ic('magnifying-glass')} ${t('vocab_find_duplicates')}</button>
       <div id="labelFilterRow" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center"></div>
+      <div id="levelFilterRow" style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center"></div>
       <div id="dupToolbar" class="hidden" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px 14px;background:var(--surface-2);border-radius:12px">
         <span id="dupCount" style="font-size:.85rem;font-weight:600;color:var(--text-muted)"></span>
         <span style="font-size:.75rem;color:var(--text-faint)">${t('vocab_dup_select_hint')}</span>
@@ -102,6 +104,7 @@ async function renderVocabulary(el, params) {
   _vocabFilter = initFilter;
   _vocabSearch = initSearch ? initSearch.toLowerCase() : '';
   _vocabLabel = '';
+  _vocabLevel = '';
   _vocabMastered = initMastered;
 
   if (initSearch) {
@@ -136,6 +139,7 @@ async function renderVocabulary(el, params) {
       api('GET', '/api/phrases?lang=' + encodeURIComponent(lang))
     ]);
     renderLabelFilterRow();
+    renderLevelFilterRow();
     renderVocabGrid();
   } catch {
     document.getElementById('vocabGrid').innerHTML = '<p style="color:var(--danger)">' + t('vocab_load_error') + '</p>';
@@ -197,6 +201,53 @@ function renderLabelFilterRow() {
   });
 }
 
+function renderLevelFilterRow() {
+  const lang = currentLang();
+  const langData = (App.config.targetLangs || []).find(l => l.isoCode === lang) || {};
+  const levels = langData.levels || [];
+  const row = document.getElementById('levelFilterRow');
+  if (!row) return;
+  if (!levels.length) { row.innerHTML = ''; return; }
+
+  row.innerHTML =
+    `<span style="font-size:.78rem;color:var(--text-faint)">${t('levels_filter')}:</span>` +
+    `<button class="label-chip active" data-lid="" style="background:var(--surface-2)">${t('vocab_all')}</button>` +
+    levels.map(lv =>
+      `<button class="label-chip" data-lid="${esc(lv.id)}" data-color="${esc(lv.color)}" style="background:${esc(lv.color)}20;border-color:${esc(lv.color)};color:${esc(lv.color)}">${esc(lv.code || lv.name)}</button>`
+    ).join('');
+
+  row.querySelectorAll('.label-chip').forEach(btn => {
+    btn.addEventListener('click', () => {
+      row.querySelectorAll('.label-chip').forEach(b => {
+        b.classList.remove('active');
+        const color = b.dataset.color;
+        if (color) {
+          b.style.background = color + '20';
+          b.style.color = color;
+          b.style.borderColor = color;
+        } else {
+          b.style.background = 'var(--surface-2)';
+          b.style.color = '';
+          b.style.borderColor = '';
+        }
+      });
+      btn.classList.add('active');
+      const color = btn.dataset.color;
+      if (color) {
+        btn.style.background = color;
+        btn.style.color = textColorForBg(color);
+        btn.style.borderColor = color;
+      } else {
+        btn.style.background = 'var(--surface-2)';
+        btn.style.color = '';
+        btn.style.borderColor = '';
+      }
+      _vocabLevel = btn.dataset.lid || '';
+      renderVocabGrid();
+    });
+  });
+}
+
 function renderVocabGrid() {
   const grid = document.getElementById('vocabGrid');
   const empty = document.getElementById('vocabEmpty');
@@ -217,9 +268,10 @@ function renderVocabGrid() {
         w.translation.toLowerCase().includes(_vocabSearch) ||
         (w.definition || '').toLowerCase().includes(_vocabSearch);
       const matchLabel = !_vocabLabel || (w.labels || []).includes(_vocabLabel);
+      const matchLevel = !_vocabLevel || w.level === _vocabLevel;
       const maxProg = w.maxProgress || wordMaxProgressClient(w.literal, w.infinitive);
       const matchMastered = !_vocabMastered || (w.progress || 0) >= maxProg;
-      return matchType && matchSearch && matchLabel && matchMastered;
+      return matchType && matchSearch && matchLabel && matchLevel && matchMastered;
     }).map(w => ({ ...w, _kind: 'word' })));
   }
   if (showPhrases) {
@@ -233,9 +285,10 @@ function renderVocabGrid() {
         p.translation.toLowerCase().includes(_vocabSearch) ||
         (p.definition || '').toLowerCase().includes(_vocabSearch);
       const matchLabel = !_vocabLabel || (p.labels || []).includes(_vocabLabel);
+      const matchLevel = !_vocabLevel || p.level === _vocabLevel;
       const pMax = p.maxProgress || phraseMaxProgressClient(p.text || p.literal || '');
       const matchMastered = !_vocabMastered || (p.progress || 0) >= pMax;
-      return matchSearch && matchLabel && matchMastered;
+      return matchSearch && matchLabel && matchLevel && matchMastered;
     }).map(p => ({ ...p, _kind: 'phrase' })));
   }
 
@@ -244,7 +297,7 @@ function renderVocabGrid() {
     empty.classList.remove('hidden');
 
     const hasAnyContent = _vocabWords.length > 0 || _vocabPhrases.length > 0;
-    const isSearchOrFilter = _vocabSearch || _vocabFilter || _vocabLabel;
+    const isSearchOrFilter = _vocabSearch || _vocabFilter || _vocabLabel || _vocabLevel;
 
     if (hasAnyContent && isSearchOrFilter) {
       const searchTerm = _vocabSearch ? `"${_vocabSearch}"` : '';
@@ -286,6 +339,12 @@ function getLabels() {
   return langData.labels || [];
 }
 
+function getLevels() {
+  const lang = currentLang();
+  const langData = (App.config.targetLangs || []).find(l => l.isoCode === lang) || {};
+  return langData.levels || [];
+}
+
 function buildWordCard(w) {
   const ic = window.phIcon;
   const labels = { noun: `${ic('package')} ${t('vocab_noun')}`, verb: `${ic('lightning')} ${t('vocab_verb')}`, adjective: `${ic('palette')} ${t('vocab_adjective')}`, adverb: `${ic('wind')} ${t('vocab_adverb')}`, other: `${ic('puzzle-piece')} ${t('vocab_other')}`, phrase: `${ic('chat-circle')} ${t('vocab_phrase')}` };
@@ -301,7 +360,9 @@ function buildWordCard(w) {
   const mastered = progress >= maxProg;
   const diffPct = Math.round((progress / maxProg) * 100);
   const allLabels = getLabels();
+  const allLevels = getLevels();
   const wordLabelIds = w.labels || [];
+  const levelObj = w.level ? allLevels.find(lv => lv.id === w.level) : null;
   const editFn = isPhrase ? 'editPhrase' : 'editWord';
   const deleteFn = isPhrase ? 'deletePhrase' : 'deleteWord';
   const linkFn = 'vocabLinkWord(\'' + w.id + '\',\'' + w.langCode + '\')';
@@ -322,11 +383,15 @@ function buildWordCard(w) {
     '</div>'
     : '';
 
+  const levelBadge = levelObj
+    ? `<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;margin-left:6px;background:${esc(levelObj.color)}20;border:1px solid ${esc(levelObj.color)};color:${esc(levelObj.color)};font-weight:600">${esc(levelObj.code || levelObj.name)}</span>`
+    : '';
+
   div.innerHTML =
     '<div class="word-card-header">' +
     '<div>' +
     '<span class="badge badge-' + (isPhrase ? 'phrase' : w.type) + '">' + (labels[w.type] || w.type) + '</span>' +
-
+    levelBadge +
     '</div>' +
     '<div class="word-actions">' +
     '<span id="tts-' + w.id + '"></span>' +
@@ -430,7 +495,9 @@ function buildWordCard(w) {
 function buildPhraseCard(p) {
   const ic = window.phIcon;
   const allLabels = getLabels();
+  const allLevels = getLevels();
   const phraseLabelIds = p.labels || [];
+  const levelObj = p.level ? allLevels.find(lv => lv.id === p.level) : null;
 
   const div = document.createElement('div');
   div.className = 'word-card';
@@ -447,11 +514,15 @@ function buildPhraseCard(p) {
     '</div>'
     : '';
 
+  const levelBadge = levelObj
+    ? `<span style="font-size:.72rem;padding:2px 7px;border-radius:10px;margin-left:6px;background:${esc(levelObj.color)}20;border:1px solid ${esc(levelObj.color)};color:${esc(levelObj.color)};font-weight:600">${esc(levelObj.code || levelObj.name)}</span>`
+    : '';
+
   const displayText = p.text || p.literal || '';
 
   div.innerHTML =
     '<div class="word-card-header">' +
-    '<span class="badge badge-phrase">' + ic('chat-circle') + ' ' + t('vocab_phrase') + '</span>' +
+    '<div><span class="badge badge-phrase">' + ic('chat-circle') + ' ' + t('vocab_phrase') + '</span>' + levelBadge + '</div>' +
     '<div class="word-actions">' +
     '<span id="ptts-' + p.id + '"></span>' +
     '<button class="btn btn-sm btn-secondary" onclick="editPhrase(\'' + p.id + '\',\'' + p.langCode + '\')" title="' + t('vocab_edit') + '">' + ic('pencil-simple') + '</button>' +
@@ -510,6 +581,70 @@ function buildLabelPicker(selectedIds, containerId) {
         onclick="showCreateLabelInline('${containerId}-chips','${lang}')">${window.phIcon('plus')} ${t('labels_create_new')}</button>
     </div>
   </div>`;
+}
+
+// ── Level picker (single-select) ───────────────────────────────────────────────
+function buildLevelPicker(selectedId, containerId) {
+  const allLevels = getLevels();
+  if (!allLevels.length) {
+    return `<div id="${containerId}" style="margin-bottom:14px">
+      <label style="font-size:.88rem;font-weight:600;color:var(--text-muted)">${t('levels_assign')} <span class="optional">${t('common_optional')}</span></label>
+      <p style="font-size:.8rem;color:var(--text-faint);margin:6px 0 0">${t('levels_empty_hint')}</p>
+    </div>`;
+  }
+  const noneActive = !selectedId;
+  return `<div id="${containerId}" style="margin-bottom:14px">
+    <label style="font-size:.88rem;font-weight:600;color:var(--text-muted)">${t('levels_assign')} <span class="optional">${t('common_optional')}</span></label>
+    <div id="${containerId}-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;min-height:28px">
+      <button type="button" class="level-pick-btn ${noneActive ? 'active' : ''}" data-lid=""
+        style="padding:3px 10px;border-radius:12px;font-size:.78rem;cursor:pointer;
+          background:${noneActive ? 'var(--surface-3,var(--surface-2))' : 'transparent'};
+          border:1.5px solid var(--border);color:var(--text-muted);transition:.15s"
+        onclick="selectLevelPick(this,'${containerId}-chips')">${t('levels_none')}</button>
+      ${allLevels.map(lv => {
+    const active = selectedId === lv.id;
+    return `<button type="button" class="level-pick-btn ${active ? 'active' : ''}"
+          data-lid="${esc(lv.id)}" data-color="${esc(lv.color)}"
+          style="padding:3px 10px;border-radius:12px;font-size:.78rem;cursor:pointer;font-weight:600;
+            background:${active ? esc(lv.color) : 'transparent'};
+            border:1.5px solid ${esc(lv.color)};color:${active ? textColorForBg(lv.color) : esc(lv.color)};transition:.15s"
+          onclick="selectLevelPick(this,'${containerId}-chips')">${esc(lv.code || lv.name)}</button>`;
+  }).join('')}
+    </div>
+  </div>`;
+}
+
+window.selectLevelPick = function (btn, chipsId) {
+  const chips = document.getElementById(chipsId);
+  if (!chips) return;
+  chips.querySelectorAll('.level-pick-btn').forEach(b => {
+    b.classList.remove('active');
+    const color = b.dataset.color;
+    if (color) {
+      b.style.background = 'transparent';
+      b.style.color = color;
+    } else {
+      b.style.background = 'transparent';
+      b.style.color = 'var(--text-muted)';
+    }
+  });
+  btn.classList.add('active');
+  const color = btn.dataset.color;
+  if (color) {
+    btn.style.background = color;
+    btn.style.color = textColorForBg(color);
+  } else {
+    btn.style.background = 'var(--surface-3,var(--surface-2))';
+    btn.style.color = 'var(--text-muted)';
+  }
+};
+
+function getSelectedLevel(chipsId) {
+  const chips = document.getElementById(chipsId);
+  if (!chips) return null;
+  const active = chips.querySelector('.level-pick-btn.active');
+  if (!active) return null;
+  return active.dataset.lid || null;
 }
 
 window.toggleLabelPick = function (btn, chipsId) {
@@ -677,6 +812,7 @@ function _buildEditWordFields(state) {
       </details>` : '';
 
   const labelPickerHtml = buildLabelPicker(state.labels || [], 'meLabelPicker');
+  const levelPickerHtml = buildLevelPicker(state.level || null, 'meLevelPicker');
   const literalFieldValue = isVerb ? (state.infinitive || state.literal) : state.literal;
 
   if (isPhrase) {
@@ -686,6 +822,7 @@ function _buildEditWordFields(state) {
     <div class="field-group"><label>${t('vocab_translation')} <span class="required">*</span></label><input id="meTranslation" value="${esc(state.translation)}"></div>
     <div class="field-group"><label>${t('vocab_note')} <span class="optional">${t('common_optional')}</span></label>
       <input id="mePNote" value="${esc(state.helpNote || state.definition || '')}"></div>
+    ${levelPickerHtml}
     ${labelPickerHtml}
     <div id="meErr" class="alert alert-danger hidden"></div>`;
   }
@@ -699,6 +836,7 @@ function _buildEditWordFields(state) {
     ${conjHtml}
     ${declHtml}
     <div class="field-group"><label>${t('vocab_definition')} <span class="optional">${t('common_optional')}</span></label><input id="meDefinition" value="${esc(state.definition || '')}"></div>
+    ${levelPickerHtml}
     ${labelPickerHtml}
     <div id="meErr" class="alert alert-danger hidden"></div>`;
 }
@@ -768,6 +906,8 @@ window.onEditWordTypeChange = function () {
 
   const labelsEl = document.getElementById('meLabelPicker-chips');
   if (labelsEl) state.labels = getSelectedLabels('meLabelPicker-chips');
+  const levelEl = document.getElementById('meLevelPicker-chips');
+  if (levelEl) state.level = getSelectedLevel('meLevelPicker-chips');
 
   state.type = newType;
 
@@ -801,6 +941,7 @@ window.editWord = function (id, lang) {
     declensions: JSON.parse(JSON.stringify(w.declensions || {})),
     infinitive: w.infinitive || '',
     labels: [...(w.labels || [])],
+    level: w.level || null,
     lang: lang
   };
 
@@ -843,7 +984,8 @@ window.saveWordEdit = async function (id, lang) {
       translation: document.getElementById('meTranslation').value.trim(),
       helpNote: helpNoteValue,
       definition: helpNoteValue,
-      labels: getSelectedLabels('meLabelPicker-chips')
+      labels: getSelectedLabels('meLabelPicker-chips'),
+      level: getSelectedLevel('meLevelPicker-chips')
     };
     if (!body.translation) {
       document.getElementById('meErr').textContent = t('add_err_phrase');
@@ -884,7 +1026,8 @@ window.saveWordEdit = async function (id, lang) {
     literal: newLiteral,
     translation: document.getElementById('meTranslation').value.trim(),
     definition: document.getElementById('meDefinition')?.value?.trim() || '',
-    labels: getSelectedLabels('meLabelPicker-chips')
+    labels: getSelectedLabels('meLabelPicker-chips'),
+    level: getSelectedLevel('meLevelPicker-chips')
   };
 
   if (selectedType === 'verb') {
@@ -1019,6 +1162,7 @@ window.editPhrase = function (id, lang) {
     declensions: JSON.parse(JSON.stringify(p.declensions || {})),
     infinitive: p.infinitive || '',
     labels: [...(p.labels || [])],
+    level: p.level || null,
     lang: lang
   };
 
@@ -1061,7 +1205,8 @@ window.savePhraseEdit = async function (id, lang) {
       translation: document.getElementById('meTranslation').value.trim(),
       helpNote: helpNoteValue,
       definition: helpNoteValue,
-      labels: getSelectedLabels('meLabelPicker-chips')
+      labels: getSelectedLabels('meLabelPicker-chips'),
+      level: getSelectedLevel('meLevelPicker-chips')
     };
     if (!body.translation) {
       document.getElementById('meErr').textContent = t('add_err_phrase');
@@ -1103,7 +1248,8 @@ window.savePhraseEdit = async function (id, lang) {
     text: newLiteral,
     translation: document.getElementById('meTranslation').value.trim(),
     definition: document.getElementById('meDefinition')?.value?.trim() || '',
-    labels: getSelectedLabels('meLabelPicker-chips')
+    labels: getSelectedLabels('meLabelPicker-chips'),
+    level: getSelectedLevel('meLevelPicker-chips')
   };
 
   if (selectedType === 'verb') {

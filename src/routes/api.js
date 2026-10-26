@@ -143,6 +143,24 @@ function buildQuizQuestion(question, pool, direction, lang) {
 const uid = () => req => req.user.id;
 const TYPES = ['noun', 'verb', 'adjective', 'adverb', 'other', 'phrase'];
 
+const CEFR_LEVEL_DEFS = [
+  { code: 'A1', name: 'A1', color: '#22c55e' },
+  { code: 'A2', name: 'A2', color: '#84cc16' },
+  { code: 'B1', name: 'B1', color: '#eab308' },
+  { code: 'B2', name: 'B2', color: '#f97316' },
+  { code: 'C1', name: 'C1', color: '#ef4444' },
+  { code: 'C2', name: 'C2', color: '#a855f7' }
+];
+
+function defaultCefrLevels() {
+  return CEFR_LEVEL_DEFS.map(l => ({ id: randomUUID(), code: l.code, name: l.name, color: l.color }));
+}
+
+function filterByLevels(pool, levelIds) {
+  if (!levelIds || !levelIds.length) return pool;
+  return pool.filter(item => item.level && levelIds.includes(item.level));
+}
+
 function userId(req) { return req.user.id; }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -176,7 +194,15 @@ router.post('/languages', (req, res) => {
     const users = getUsers();
     const userRecord = users[userId(req)];
     const defaultCache = userRecord ? (userRecord.ttsCacheDefault === true) : false;
-    cfg.targetLangs.push({ isoCode, name, flag: flag || '🌐', nativeName: nativeName || name, tenses: [{ nativeName: 'Present', targetName: 'Present' }], ttsCache: defaultCache });
+    cfg.targetLangs.push({
+      isoCode,
+      name,
+      flag: flag || '🌐',
+      nativeName: nativeName || name,
+      tenses: [{ nativeName: 'Present', targetName: 'Present' }],
+      ttsCache: defaultCache,
+      levels: defaultCefrLevels()
+    });
   }
   if (!cfg.currentLang) cfg.currentLang = isoCode;
   saveUserConfig(userId(req), cfg);
@@ -213,6 +239,8 @@ router.put('/languages/:code', (req, res) => {
   // verbGroups: array of { id, name }
   if (req.body.verbGroups !== undefined) lang.verbGroups = req.body.verbGroups;
   if (req.body.labels !== undefined) lang.labels = req.body.labels;
+  // levels: array of { id, code, name, color } — CEFR / custom proficiency
+  if (req.body.levels !== undefined) lang.levels = req.body.levels;
   // TTS speeds: floats 0.1–1.0
   if (req.body.ttsSpeedNormal !== undefined) lang.ttsSpeedNormal = req.body.ttsSpeedNormal;
   if (req.body.ttsSpeedSlow !== undefined) lang.ttsSpeedSlow = req.body.ttsSpeedSlow;
@@ -700,7 +728,7 @@ router.get('/words', (req, res) => {
 
 // POST /api/words
 router.post('/words', (req, res) => {
-  const { lang, type, literal, translation, definition, article, infinitive, conjugation, declensions, verbGroup, labels, verbConjugationTranslation } = req.body;
+  const { lang, type, literal, translation, definition, article, infinitive, conjugation, declensions, verbGroup, labels, level, verbConjugationTranslation } = req.body;
   if (!lang || !type || !literal || !translation)
     return res.status(400).json({ error: 'lang, type, literal, translation required.' });
   if (!TYPES.includes(type))
@@ -728,6 +756,7 @@ router.post('/words', (req, res) => {
   }
   if (declensions !== undefined) word.declensions = declensions;
   if (labels !== undefined) word.labels = labels;
+  if (level !== undefined) word.level = level || null;
   if (verbConjugationTranslation !== undefined) word.verbConjugationTranslation = verbConjugationTranslation;
 
   words.push(word);
@@ -744,8 +773,8 @@ router.put('/words/:id', (req, res) => {
   if (idx === -1) return res.status(404).json({ error: 'Word not found.' });
 
   const w = words[idx];
-  ['type', 'translation', 'definition', 'article', 'infinitive', 'conjugation', 'declensions', 'verbGroup', 'literal', 'labels', 'verbConjugationTranslation', 'progress', 'maxProgress', 'text', 'helpNote'].forEach(k => {
-    if (req.body[k] !== undefined) w[k] = req.body[k];
+  ['type', 'translation', 'definition', 'article', 'infinitive', 'conjugation', 'declensions', 'verbGroup', 'literal', 'labels', 'level', 'verbConjugationTranslation', 'progress', 'maxProgress', 'text', 'helpNote'].forEach(k => {
+    if (req.body[k] !== undefined) w[k] = req.body[k] === '' && k === 'level' ? null : req.body[k];
   });
 
   // If type changed, clean up fields that don't belong to the new type
@@ -829,7 +858,7 @@ router.get('/phrases/random', (req, res) => {
 
 // POST /api/phrases
 router.post('/phrases', (req, res) => {
-  const { lang, text, translation, helpNote, labels, type } = req.body;
+  const { lang, text, translation, helpNote, labels, level, type } = req.body;
   if (!lang || !text || !translation)
     return res.status(400).json({ error: 'lang, text, translation required.' });
   if (type !== undefined && !TYPES.includes(type))
@@ -844,6 +873,7 @@ router.post('/phrases', (req, res) => {
     translation: translation.trim(),
     helpNote: helpNote ? helpNote.trim() : '',
     labels: labels || [],
+    level: level || null,
     progress: 0,
     maxProgress: phraseMaxProgress(text),
     createdAt: new Date().toISOString()
@@ -861,8 +891,8 @@ router.put('/phrases/:id', (req, res) => {
   const idx = phrases.findIndex(p => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Phrase not found.' });
 
-  ['type', 'text', 'translation', 'helpNote', 'labels', 'progress', 'maxProgress', 'article', 'literal', 'definition', 'infinitive', 'conjugation', 'declensions', 'verbGroup'].forEach(k => {
-    if (req.body[k] !== undefined) phrases[idx][k] = req.body[k];
+  ['type', 'text', 'translation', 'helpNote', 'labels', 'level', 'progress', 'maxProgress', 'article', 'literal', 'definition', 'infinitive', 'conjugation', 'declensions', 'verbGroup'].forEach(k => {
+    if (req.body[k] !== undefined) phrases[idx][k] = (k === 'level' && req.body[k] === '') ? null : req.body[k];
   });
 
   if (req.body.type !== undefined) {
@@ -920,15 +950,17 @@ router.delete('/phrases/:id', (req, res) => {
 // QUIZ – Words
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/quiz?lang=fr[&type=verb,noun][&direction=random][&labels=id1,id2][&dateFrom=2026-07-01][&dateTo=2026-07-31]
+// GET /api/quiz?lang=fr[&type=verb,noun][&direction=random][&labels=id1,id2][&levels=id1][&dateFrom=2026-07-01][&dateTo=2026-07-31]
 router.get('/quiz', (req, res) => {
   const { lang, direction = 'random', dateFrom, dateTo } = req.query;
   const types = req.query.types ? req.query.types.split(',') : TYPES;
   const labels = req.query.labels ? req.query.labels.split(',') : [];
+  const levels = req.query.levels ? req.query.levels.split(',').filter(Boolean) : [];
   if (!lang) return res.status(400).json({ error: 'lang required' });
 
   let pool = getWords(userId(req), lang).filter(w => types.includes(w.type));
   if (labels.length) pool = pool.filter(w => labels.some(lid => (w.labels || []).includes(lid)));
+  pool = filterByLevels(pool, levels);
   if (dateFrom) pool = pool.filter(w => w.createdAt >= dateFrom);
   if (dateTo) pool = pool.filter(w => w.createdAt <= dateTo + 'T23:59:59.999Z');
   if (pool.length < 2) return res.status(400).json({ error: 'Add at least 2 words to start!' });
@@ -956,10 +988,12 @@ router.get('/quiz/batch', (req, res) => {
   const { lang, direction = 'random', count = 30, dateFrom, dateTo, order = 'random', sortDir = 'desc' } = req.query;
   const types = req.query.types ? req.query.types.split(',') : TYPES;
   const labels = req.query.labels ? req.query.labels.split(',') : [];
+  const levels = req.query.levels ? req.query.levels.split(',').filter(Boolean) : [];
   if (!lang) return res.status(400).json({ error: 'lang required' });
 
   let pool = getWords(userId(req), lang).filter(w => types.includes(w.type));
   if (labels.length) pool = pool.filter(w => labels.some(lid => (w.labels || []).includes(lid)));
+  pool = filterByLevels(pool, levels);
   if (dateFrom) pool = pool.filter(w => w.createdAt >= dateFrom);
   if (dateTo) pool = pool.filter(w => w.createdAt <= dateTo + 'T23:59:59.999Z');
   if (pool.length < 2) return res.status(400).json({ error: 'Add at least 2 words to start!' });
@@ -1016,13 +1050,15 @@ router.post('/quiz/answer', (req, res) => {
 // QUIZ – Phrases
 // ─────────────────────────────────────────────────────────────────────────────
 
-// GET /api/quiz/phrase?lang=fr[&labels=id1,id2][&dateFrom=2026-07-01][&dateTo=2026-07-31]
+// GET /api/quiz/phrase?lang=fr[&labels=id1,id2][&levels=id1][&dateFrom=2026-07-01][&dateTo=2026-07-31]
 router.get('/quiz/phrase', (req, res) => {
   const { lang, dateFrom, dateTo } = req.query;
   const labels = req.query.labels ? req.query.labels.split(',') : [];
+  const levels = req.query.levels ? req.query.levels.split(',').filter(Boolean) : [];
   if (!lang) return res.status(400).json({ error: 'lang required' });
   let phrases = getPhrases(userId(req), lang);
   if (labels.length) phrases = phrases.filter(p => labels.some(lid => (p.labels || []).includes(lid)));
+  phrases = filterByLevels(phrases, levels);
   if (dateFrom) phrases = phrases.filter(p => p.createdAt >= dateFrom);
   if (dateTo) phrases = phrases.filter(p => p.createdAt <= dateTo + 'T23:59:59.999Z');
   if (!phrases.length) return res.status(404).json({ error: 'No phrases yet.' });
@@ -1030,14 +1066,16 @@ router.get('/quiz/phrase', (req, res) => {
   res.json(phrase);
 });
 
-// GET /api/quiz/phrase/batch?lang=fr&count=20&labels=id1&dateFrom=...&dateTo=...
+// GET /api/quiz/phrase/batch?lang=fr&count=20&labels=id1&levels=id1&dateFrom=...&dateTo=...
 // order=random (default) | sequential   sortDir=desc (newest first, default) | asc (oldest first)
 router.get('/quiz/phrase/batch', (req, res) => {
   const { lang, count = 20, dateFrom, dateTo, order = 'random', sortDir = 'desc' } = req.query;
   const labels = req.query.labels ? req.query.labels.split(',') : [];
+  const levels = req.query.levels ? req.query.levels.split(',').filter(Boolean) : [];
   if (!lang) return res.status(400).json({ error: 'lang required' });
   let phrases = getPhrases(userId(req), lang);
   if (labels.length) phrases = phrases.filter(p => labels.some(lid => (p.labels || []).includes(lid)));
+  phrases = filterByLevels(phrases, levels);
   if (dateFrom) phrases = phrases.filter(p => p.createdAt >= dateFrom);
   if (dateTo) phrases = phrases.filter(p => p.createdAt <= dateTo + 'T23:59:59.999Z');
   if (!phrases.length) return res.status(404).json({ error: 'No phrases yet.' });
@@ -1322,6 +1360,438 @@ router.delete('/labels/:id', (req, res) => {
   saveWords(userId(req), lang, words);
 
   res.json({ ok: true });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LEVELS (CEFR / proficiency)
+// ─────────────────────────────────────────────────────────────────────────────
+
+router.get('/levels', (req, res) => {
+  const { lang } = req.query;
+  if (!lang) return res.status(400).json({ error: 'lang required' });
+  const cfg = getUserConfig(userId(req));
+  const langData = (cfg.targetLangs || []).find(l => l.isoCode === lang) || {};
+  res.json(langData.levels || []);
+});
+
+router.post('/levels', (req, res) => {
+  const { lang, name, code, color } = req.body;
+  if (!lang || !name) return res.status(400).json({ error: 'lang and name required' });
+  const cfg = getUserConfig(userId(req));
+  const langData = (cfg.targetLangs || []).find(l => l.isoCode === lang);
+  if (!langData) return res.status(404).json({ error: 'Language not found.' });
+  if (!langData.levels) langData.levels = [];
+  const codeVal = (code || name).trim();
+  if (langData.levels.find(lv =>
+    lv.name.toLowerCase() === name.trim().toLowerCase() ||
+    (lv.code || '').toLowerCase() === codeVal.toLowerCase()
+  )) {
+    return res.status(409).json({ error: 'Level already exists.' });
+  }
+  const level = {
+    id: randomUUID(),
+    name: name.trim(),
+    code: codeVal,
+    color: color || '#6c757d'
+  };
+  langData.levels.push(level);
+  saveUserConfig(userId(req), cfg);
+  res.status(201).json({ ok: true, level });
+});
+
+router.put('/levels/:id', (req, res) => {
+  const { lang } = req.query;
+  if (!lang) return res.status(400).json({ error: 'lang required' });
+  const cfg = getUserConfig(userId(req));
+  const langData = (cfg.targetLangs || []).find(l => l.isoCode === lang);
+  if (!langData) return res.status(404).json({ error: 'Language not found.' });
+  const level = (langData.levels || []).find(lv => lv.id === req.params.id);
+  if (!level) return res.status(404).json({ error: 'Level not found.' });
+  if (req.body.name !== undefined) level.name = req.body.name.trim();
+  if (req.body.code !== undefined) level.code = req.body.code.trim();
+  if (req.body.color !== undefined) level.color = req.body.color;
+  saveUserConfig(userId(req), cfg);
+  res.json({ ok: true, level });
+});
+
+router.delete('/levels/:id', (req, res) => {
+  const { lang } = req.query;
+  if (!lang) return res.status(400).json({ error: 'lang required' });
+  const uid = userId(req);
+  const cfg = getUserConfig(uid);
+  const langData = (cfg.targetLangs || []).find(l => l.isoCode === lang);
+  if (!langData) return res.status(404).json({ error: 'Language not found.' });
+  const before = (langData.levels || []).length;
+  langData.levels = (langData.levels || []).filter(lv => lv.id !== req.params.id);
+  if (langData.levels.length === before) return res.status(404).json({ error: 'Level not found.' });
+  saveUserConfig(uid, cfg);
+
+  const words = getWords(uid, lang);
+  let dirty = false;
+  words.forEach(w => {
+    if (w.level === req.params.id) { w.level = null; dirty = true; }
+  });
+  if (dirty) saveWords(uid, lang, words);
+
+  const phrases = getPhrases(uid, lang);
+  dirty = false;
+  phrases.forEach(p => {
+    if (p.level === req.params.id) { p.level = null; dirty = true; }
+  });
+  if (dirty) savePhrases(uid, lang, phrases);
+
+  res.json({ ok: true });
+});
+
+// Seed CEFR A1–C2 if missing
+router.post('/levels/seed-cefr', (req, res) => {
+  const { lang } = req.body;
+  if (!lang) return res.status(400).json({ error: 'lang required' });
+  const cfg = getUserConfig(userId(req));
+  const langData = (cfg.targetLangs || []).find(l => l.isoCode === lang);
+  if (!langData) return res.status(404).json({ error: 'Language not found.' });
+  if (!langData.levels) langData.levels = [];
+  const existing = new Set(
+    langData.levels.flatMap(lv => [
+      (lv.code || '').toLowerCase(),
+      (lv.name || '').toLowerCase()
+    ]).filter(Boolean)
+  );
+  const added = [];
+  CEFR_LEVEL_DEFS.forEach(def => {
+    if (existing.has(def.code.toLowerCase()) || existing.has(def.name.toLowerCase())) return;
+    const level = { id: randomUUID(), code: def.code, name: def.name, color: def.color };
+    langData.levels.push(level);
+    added.push(level);
+  });
+  if (added.length) saveUserConfig(userId(req), cfg);
+  res.json({ ok: true, added, levels: langData.levels });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BULK JSON IMPORT (words / phrases / topics)
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/import
+// Body:
+// {
+//   lang: "en",
+//   skipDuplicates?: true,          // default true — skip same literal/text
+//   topics?: [ "Food" | { name, color? } ],
+//   words?:  [ { type, literal, translation, definition?, article?,
+//                infinitive?, verbGroup?, conjugation?, declensions?,
+//                topics?: ["Food"] | labels?: ["Food"] } ],
+//   phrases?: [ { text, translation, helpNote?, topics?: ["Food"] } ]
+// }
+// Also accepts a bare array of words (lang still required in body or query).
+
+const TOPIC_COLORS = [
+  '#439b00', '#2563eb', '#dc2626', '#d97706',
+  '#7c3aed', '#0891b2', '#db2777', '#4b5563'
+];
+
+function topicNamesOf(entry) {
+  const raw = entry.topics !== undefined ? entry.topics : entry.labels;
+  if (!raw) return [];
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(t => (typeof t === 'string' ? t : (t && t.name)) || '')
+    .map(s => String(s).trim())
+    .filter(Boolean);
+}
+
+function ensureTopics(langData, wantedNames, declaredTopics) {
+  if (!langData.labels) langData.labels = [];
+  const byName = new Map(
+    langData.labels.map(lb => [lb.name.toLowerCase(), lb])
+  );
+  const created = [];
+  let colorIdx = langData.labels.length;
+
+  const declareColor = new Map();
+  (declaredTopics || []).forEach(t => {
+    if (typeof t === 'string') return;
+    if (t && t.name) declareColor.set(String(t.name).trim().toLowerCase(), t.color);
+  });
+
+  const allNames = new Set([
+    ...wantedNames.map(n => n.toLowerCase()),
+    ...(declaredTopics || []).map(t =>
+      (typeof t === 'string' ? t : (t && t.name) || '').trim().toLowerCase()
+    ).filter(Boolean)
+  ]);
+
+  allNames.forEach(key => {
+    if (byName.has(key)) return;
+    const original =
+      wantedNames.find(n => n.toLowerCase() === key) ||
+      (declaredTopics || []).map(t => typeof t === 'string' ? t : (t && t.name) || '')
+        .find(n => n && n.toLowerCase() === key) ||
+      key;
+    const color = declareColor.get(key) || TOPIC_COLORS[colorIdx % TOPIC_COLORS.length];
+    colorIdx++;
+    const label = { id: randomUUID(), name: String(original).trim(), color };
+    langData.labels.push(label);
+    byName.set(key, label);
+    created.push(label);
+  });
+
+  return { byName, created };
+}
+
+function levelKeyOf(entry) {
+  if (entry == null) return '';
+  if (typeof entry === 'string') return entry.trim();
+  if (typeof entry === 'object') {
+    return String(entry.code || entry.name || entry.level || '').trim();
+  }
+  return '';
+}
+
+function ensureLevels(langData, wantedKeys, declaredLevels) {
+  if (!langData.levels) langData.levels = [];
+  const byKey = new Map();
+  langData.levels.forEach(lv => {
+    if (lv.code) byKey.set(String(lv.code).toLowerCase(), lv);
+    if (lv.name) byKey.set(String(lv.name).toLowerCase(), lv);
+    byKey.set(lv.id, lv);
+  });
+  const created = [];
+  const declareMeta = new Map();
+  (declaredLevels || []).forEach(lv => {
+    if (typeof lv === 'string') return;
+    if (!lv) return;
+    const key = String(lv.code || lv.name || '').trim().toLowerCase();
+    if (key) declareMeta.set(key, lv);
+  });
+
+  const allKeys = new Set([
+    ...wantedKeys.map(k => k.toLowerCase()),
+    ...(declaredLevels || []).map(lv => levelKeyOf(lv).toLowerCase()).filter(Boolean)
+  ]);
+
+  allKeys.forEach(key => {
+    if (!key || byKey.has(key)) return;
+    const meta = declareMeta.get(key) || {};
+    const cefr = CEFR_LEVEL_DEFS.find(d => d.code.toLowerCase() === key);
+    const code = (meta.code || cefr?.code || key).toString().trim();
+    const name = (meta.name || cefr?.name || code).toString().trim();
+    const color = meta.color || cefr?.color || TOPIC_COLORS[created.length % TOPIC_COLORS.length];
+    const level = { id: randomUUID(), code, name, color };
+    langData.levels.push(level);
+    byKey.set(code.toLowerCase(), level);
+    byKey.set(name.toLowerCase(), level);
+    byKey.set(level.id, level);
+    created.push(level);
+  });
+
+  return { byKey, created };
+}
+
+router.post('/import', (req, res) => {
+  const lang = req.body.lang || req.query.lang;
+  if (!lang) return res.status(400).json({ error: 'lang required' });
+
+  let payload = req.body;
+  // Allow { lang, items: [...] } or raw words array under body.words / body
+  if (Array.isArray(req.body)) {
+    payload = { lang, words: req.body };
+  }
+
+  const skipDuplicates = payload.skipDuplicates !== false;
+  const declaredTopics = payload.topics || payload.labels || [];
+  const declaredLevels = payload.levels || [];
+  const wordItems = Array.isArray(payload.words) ? payload.words
+    : (Array.isArray(payload.items) ? payload.items : []);
+  const phraseItems = Array.isArray(payload.phrases) ? payload.phrases : [];
+
+  if (!wordItems.length && !phraseItems.length && !declaredTopics.length && !declaredLevels.length) {
+    return res.status(400).json({
+      error: 'Provide words[], phrases[], topics[], and/or levels[] in the JSON.'
+    });
+  }
+
+  const uid = userId(req);
+  const cfg = getUserConfig(uid);
+  const langData = (cfg.targetLangs || []).find(l => l.isoCode === lang);
+  if (!langData) return res.status(404).json({ error: 'Language not found. Add it in Settings first.' });
+
+  const wantedFromEntries = [];
+  wordItems.forEach(w => topicNamesOf(w).forEach(n => wantedFromEntries.push(n)));
+  phraseItems.forEach(p => topicNamesOf(p).forEach(n => wantedFromEntries.push(n)));
+  (declaredTopics || []).forEach(t => {
+    const n = typeof t === 'string' ? t : (t && t.name);
+    if (n) wantedFromEntries.push(String(n).trim());
+  });
+
+  const wantedLevels = [];
+  wordItems.forEach(w => { const k = levelKeyOf(w.level); if (k) wantedLevels.push(k); });
+  phraseItems.forEach(p => { const k = levelKeyOf(p.level); if (k) wantedLevels.push(k); });
+  (declaredLevels || []).forEach(lv => { const k = levelKeyOf(lv); if (k) wantedLevels.push(k); });
+
+  const { byName, created: topicsCreated } = ensureTopics(
+    langData, wantedFromEntries, declaredTopics
+  );
+  const { byKey: levelByKey, created: levelsCreated } = ensureLevels(
+    langData, wantedLevels, declaredLevels
+  );
+  if (topicsCreated.length || levelsCreated.length) saveUserConfig(uid, cfg);
+
+  const resolveLabelIds = (entry) => {
+    const ids = [];
+    topicNamesOf(entry).forEach(name => {
+      const lb = byName.get(name.toLowerCase());
+      if (lb && !ids.includes(lb.id)) ids.push(lb.id);
+    });
+    // Also accept label UUIDs already present
+    const raw = entry.topics !== undefined ? entry.topics : entry.labels;
+    if (Array.isArray(raw)) {
+      raw.forEach(t => {
+        if (typeof t === 'string' && byName.has(t.toLowerCase())) return;
+        if (typeof t === 'string' && (langData.labels || []).some(lb => lb.id === t)) {
+          if (!ids.includes(t)) ids.push(t);
+        }
+      });
+    }
+    return ids;
+  };
+
+  const resolveLevelId = (entry) => {
+    const key = levelKeyOf(entry && entry.level);
+    if (!key) return null;
+    const lv = levelByKey.get(key.toLowerCase()) || levelByKey.get(key);
+    return lv ? lv.id : null;
+  };
+
+  const words = getWords(uid, lang);
+  const phrases = getPhrases(uid, lang);
+  const existingLiterals = new Set(words.map(w => (w.literal || '').trim().toLowerCase()));
+  const existingTexts = new Set(phrases.map(p => (p.text || '').trim().toLowerCase()));
+
+  const result = {
+    ok: true,
+    topicsCreated: topicsCreated.map(t => ({ id: t.id, name: t.name, color: t.color })),
+    levelsCreated: levelsCreated.map(l => ({ id: l.id, code: l.code, name: l.name, color: l.color })),
+    words: { created: 0, skipped: 0, errors: [] },
+    phrases: { created: 0, skipped: 0, errors: [] }
+  };
+
+  wordItems.forEach((raw, i) => {
+    try {
+      const type = (raw.type || 'other').toLowerCase();
+      const literal = (raw.literal || raw.word || raw.text || '').toString().trim();
+      const translation = (raw.translation || '').toString().trim();
+      if (!literal || !translation) {
+        result.words.errors.push({ index: i, error: 'literal and translation required', item: raw });
+        return;
+      }
+      if (type === 'phrase') {
+        // Allow phrase-shaped items inside words[] — route to phrases
+        const key = literal.toLowerCase();
+        if (skipDuplicates && existingTexts.has(key)) {
+          result.phrases.skipped++;
+          return;
+        }
+        const phrase = {
+          id: randomUUID(),
+          type: 'phrase',
+          langCode: lang,
+          text: literal,
+          translation,
+          helpNote: raw.helpNote || raw.note || raw.definition
+            ? String(raw.helpNote || raw.note || raw.definition).trim() : '',
+          labels: resolveLabelIds(raw),
+          level: resolveLevelId(raw),
+          progress: 0,
+          maxProgress: phraseMaxProgress(literal),
+          createdAt: new Date().toISOString()
+        };
+        phrases.push(phrase);
+        existingTexts.add(key);
+        result.phrases.created++;
+        return;
+      }
+      if (!TYPES.includes(type) || type === 'phrase') {
+        result.words.errors.push({ index: i, error: `invalid type "${type}"`, item: raw });
+        return;
+      }
+      const key = literal.toLowerCase();
+      if (skipDuplicates && existingLiterals.has(key)) {
+        result.words.skipped++;
+        return;
+      }
+      const infinitive = raw.infinitive ? String(raw.infinitive).trim() : '';
+      const word = {
+        id: randomUUID(),
+        type,
+        literal,
+        translation,
+        definition: raw.definition ? String(raw.definition).trim() : '',
+        langCode: lang,
+        progress: 0,
+        maxProgress: wordMaxProgress(literal, infinitive),
+        labels: resolveLabelIds(raw),
+        level: resolveLevelId(raw),
+        createdAt: new Date().toISOString()
+      };
+      if (type === 'noun') word.article = raw.article ? String(raw.article).trim() : '';
+      if (type === 'verb') {
+        word.conjugation = raw.conjugation || {};
+        if (raw.verbGroup !== undefined) word.verbGroup = raw.verbGroup;
+        if (infinitive) word.infinitive = infinitive;
+        if (raw.verbConjugationTranslation !== undefined)
+          word.verbConjugationTranslation = raw.verbConjugationTranslation;
+      }
+      if (raw.declensions !== undefined) word.declensions = raw.declensions;
+      words.push(word);
+      existingLiterals.add(key);
+      result.words.created++;
+    } catch (err) {
+      result.words.errors.push({ index: i, error: err.message, item: raw });
+    }
+  });
+
+  phraseItems.forEach((raw, i) => {
+    try {
+      const text = (raw.text || raw.literal || raw.phrase || '').toString().trim();
+      const translation = (raw.translation || '').toString().trim();
+      if (!text || !translation) {
+        result.phrases.errors.push({ index: i, error: 'text and translation required', item: raw });
+        return;
+      }
+      const key = text.toLowerCase();
+      if (skipDuplicates && existingTexts.has(key)) {
+        result.phrases.skipped++;
+        return;
+      }
+      const phrase = {
+        id: randomUUID(),
+        type: 'phrase',
+        langCode: lang,
+        text,
+        translation,
+        helpNote: raw.helpNote || raw.note
+          ? String(raw.helpNote || raw.note).trim() : '',
+        labels: resolveLabelIds(raw),
+        level: resolveLevelId(raw),
+        progress: 0,
+        maxProgress: phraseMaxProgress(text),
+        createdAt: new Date().toISOString()
+      };
+      phrases.push(phrase);
+      existingTexts.add(key);
+      result.phrases.created++;
+    } catch (err) {
+      result.phrases.errors.push({ index: i, error: err.message, item: raw });
+    }
+  });
+
+  if (result.words.created) saveWords(uid, lang, words);
+  if (result.phrases.created) savePhrases(uid, lang, phrases);
+
+  // Refresh labels/levels into response for client cache
+  result.labels = langData.labels || [];
+  result.levels = langData.levels || [];
+  res.status(201).json(result);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -602,6 +602,7 @@ window.openLangConfig = function (isoCode) {
   let tenses = (lang.tenses && lang.tenses.length) ? lang.tenses.map(t => ({ ...t })) : [{ nativeName: 'Present', targetName: 'Present' }];
   let verbGroups = (lang.verbGroups || []).map(g => ({ ...g }));
   let labels = (lang.labels || []).map(lb => ({ ...lb }));
+  let levels = (lang.levels || []).map(lv => ({ ...lv }));
   let ttsSpeedNormal = lang.ttsSpeedNormal != null ? lang.ttsSpeedNormal : 1.0;
   let ttsSpeedSlow = lang.ttsSpeedSlow != null ? lang.ttsSpeedSlow : 0.24;
   let ttsCacheEnabled = lang.ttsCache !== false; // default true if not set
@@ -731,6 +732,34 @@ window.openLangConfig = function (isoCode) {
     });
   }
 
+  function renderLevelRows() {
+    const container = document.getElementById('levelsContainer');
+    if (!container) return;
+    if (!levels.length) {
+      container.innerHTML = `<p style="color:var(--text-faint);font-size:.85rem;margin:4px 0">${t('levels_empty')}</p>`;
+      return;
+    }
+    container.innerHTML = levels.map((lv, i) => `
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <input type="color" class="lv-color" data-i="${i}" value="${esc(lv.color || '#6c757d')}"
+          style="width:36px;height:32px;border:none;background:transparent;cursor:pointer;padding:0">
+        <input type="text" class="lv-code" data-i="${i}" value="${esc(lv.code || '')}" placeholder="A1"
+          style="width:64px;padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text);font-weight:600;text-align:center">
+        <input type="text" class="lv-name" data-i="${i}" value="${esc(lv.name || '')}" placeholder="${t('levels_name')}"
+          style="flex:1;padding:8px;border-radius:8px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text)">
+        <button onclick="removeLevelCfg(${i})" style="background:none;border:none;cursor:pointer;font-size:1.1rem;color:var(--danger);padding:4px">${window.phIcon('x')}</button>
+      </div>`).join('');
+    container.querySelectorAll('.lv-code').forEach(inp =>
+      inp.addEventListener('input', () => {
+        levels[+inp.dataset.i].code = inp.value;
+        if (!levels[+inp.dataset.i].name) levels[+inp.dataset.i].name = inp.value;
+      }));
+    container.querySelectorAll('.lv-name').forEach(inp =>
+      inp.addEventListener('input', () => { levels[+inp.dataset.i].name = inp.value; }));
+    container.querySelectorAll('.lv-color').forEach(inp =>
+      inp.addEventListener('input', () => { levels[+inp.dataset.i].color = inp.value; }));
+  }
+
   openModal(`${t('settings_lang_config_title')}: ${lang.flag || '🌐'} ${lang.name}`, `
     <div style="margin-bottom:20px">
       <h3 style="font-size:1rem;margin-bottom:4px">${window.phIcon('arrows-split')} ${t('settings_declensions_title')}</h3>
@@ -749,6 +778,15 @@ window.openLangConfig = function (isoCode) {
       <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:10px">${t('settings_vg_desc')}</p>
       <div id="vgContainer"></div>
       <button class="btn btn-secondary btn-sm" style="margin-top:8px" onclick="addVerbGroup()">${t('settings_vg_add')}</button>
+    </div>
+    <div style="margin-bottom:20px">
+      <h3 style="font-size:1rem;margin-bottom:4px">${window.phIcon('target')} ${t('levels_title')}</h3>
+      <p style="color:var(--text-muted);font-size:.85rem;margin-bottom:10px">${t('levels_manage')}</p>
+      <div id="levelsContainer"></div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px">
+        <button class="btn btn-secondary btn-sm" onclick="addLevelCfg()">${window.phIcon('plus')} ${t('levels_add_btn')}</button>
+        <button class="btn btn-secondary btn-sm" onclick="seedCefrLevels()">${window.phIcon('stack')} ${t('levels_seed_cefr')}</button>
+      </div>
     </div>
     <div>
       <h3 style="font-size:1rem;margin-bottom:4px">${window.phIcon('tag')} ${t('labels_title')}</h3>
@@ -827,6 +865,7 @@ window.openLangConfig = function (isoCode) {
   renderDeclensionRows();
   renderTenseRows();
   renderVerbGroupRows();
+  renderLevelRows();
   renderLabelRows();
 
   // TTS speed sliders
@@ -1109,6 +1148,26 @@ toast(window.phIcon('trash') + ' ' + t('settings_tts_cache_purged').replace('{n}
   };
   window.removeLabelCfg = (i) => { labels.splice(i, 1); renderLabelRows(); };
 
+  const LEVEL_COLORS = ['#22c55e', '#84cc16', '#eab308', '#f97316', '#ef4444', '#a855f7', '#2563eb', '#0891b2'];
+  let levelColorIdx = levels.length;
+  window.addLevelCfg = () => {
+    const color = LEVEL_COLORS[levelColorIdx % LEVEL_COLORS.length];
+    levelColorIdx++;
+    levels.push({ id: crypto.randomUUID(), code: '', name: '', color });
+    renderLevelRows();
+  };
+  window.removeLevelCfg = (i) => { levels.splice(i, 1); renderLevelRows(); };
+  window.seedCefrLevels = async () => {
+    try {
+      const r = await api('POST', '/api/levels/seed-cefr', { lang: isoCode });
+      levels = (r.levels || []).map(lv => ({ ...lv }));
+      renderLevelRows();
+      toast(window.phIcon('check') + ' ' + t('levels_seeded').replace('{n}', String((r.added || []).length)), 'success', true);
+    } catch (e) {
+      toast((e && e.error) || t('common_error'), 'danger');
+    }
+  };
+
   window.saveLangConfig = async function (code) {
     const errEl = document.getElementById('lcErr');
     errEl.classList.add('hidden');
@@ -1124,8 +1183,15 @@ toast(window.phIcon('trash') + ' ' + t('settings_tts_cache_purged').replace('{n}
     if (labels.some(lb => !lb.name.trim())) {
       errEl.textContent = t('labels_add_ph'); errEl.classList.remove('hidden'); return;
     }
+    if (levels.some(lv => !String(lv.code || lv.name || '').trim())) {
+      errEl.textContent = t('levels_err_empty'); errEl.classList.remove('hidden'); return;
+    }
+    levels.forEach(lv => {
+      if (!lv.code) lv.code = lv.name;
+      if (!lv.name) lv.name = lv.code;
+    });
     try {
-      await api('PUT', '/api/languages/' + encodeURIComponent(code), { declensions, tenses, verbGroups, labels, ttsSpeedNormal, ttsSpeedSlow, ttsCache: ttsCacheEnabled });
+      await api('PUT', '/api/languages/' + encodeURIComponent(code), { declensions, tenses, verbGroups, labels, levels, ttsSpeedNormal, ttsSpeedSlow, ttsCache: ttsCacheEnabled });
       await loadConfig();
 
       // Purge ONLY the speed bucket(s) that actually changed, leave the other intact.

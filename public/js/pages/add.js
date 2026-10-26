@@ -43,6 +43,7 @@ function renderAdd(el) {
     <div class="add-tabs">
       <button class="add-tab active" data-tab="word"   onclick="switchAddTab('word',this)">${ic('lego')} ${t('add_tab_word')}</button>
       <button class="add-tab"        data-tab="phrase" onclick="switchAddTab('phrase',this)">${ic('chat-circle')} ${t('add_tab_phrase')}</button>
+      <button class="add-tab"        data-tab="import" onclick="switchAddTab('import',this)">${ic('tray-arrow-up')} ${t('add_tab_import')}</button>
     </div>
 
     <!-- WORD FORM -->
@@ -103,6 +104,7 @@ function renderAdd(el) {
           <label>${t('add_definition')} <span class="optional">${t('vocab_optional')}</span></label>
           <input type="text" id="wDefinition" autocomplete="off" placeholder="${t('add_definition_ph')}">
         </div>
+        <div id="wordLevelPickerContainer"></div>
         <div id="wordLabelPickerContainer"></div>
         <div id="wordAddErr" class="alert alert-danger hidden"></div>
         <div id="wordAddOk"  class="alert alert-success hidden"></div>
@@ -125,6 +127,7 @@ function renderAdd(el) {
           <label>${t('add_phrase_note')} <span class="optional">${t('vocab_optional')}</span></label>
           <input type="text" id="pNote" autocomplete="off" placeholder="${t('add_phrase_note_ph')}">
         </div>
+        <div id="phraseLevelPickerContainer"></div>
         <div id="phraseLabelPickerContainer"></div>
         <div id="phraseAddErr" class="alert alert-danger hidden"></div>
         <div id="phraseAddOk"  class="alert alert-success hidden"></div>
@@ -132,6 +135,32 @@ function renderAdd(el) {
       </div>
     </div>
 
+    <!-- JSON IMPORT -->
+    <div id="tabImport" class="hidden">
+      <div class="card">
+        <h3 style="margin:0 0 8px;font-size:1.05rem">${ic('tray-arrow-up')} ${t('import_title')}</h3>
+        <p style="color:var(--text-muted);font-size:.88rem;margin:0 0 12px">${t('import_desc')}</p>
+        <p style="color:var(--text-faint);font-size:.8rem;margin:0 0 12px">${t('import_format_hint')}</p>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;align-items:center">
+          <a class="btn btn-sm btn-secondary" href="/examples/words-import.example.json" download="words-import.example.json">${ic('files')} ${t('import_example')}</a>
+          <label class="btn btn-sm btn-secondary" style="cursor:pointer;margin:0">
+            ${ic('files')} ${t('import_file')}
+            <input type="file" id="importFileInput" accept=".json,application/json" style="display:none">
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:.85rem;cursor:pointer;user-select:none;margin-left:auto">
+            <input type="checkbox" id="importSkipDup" checked>
+            ${t('import_skip_dup')}
+          </label>
+        </div>
+        <div class="field-group">
+          <textarea id="importJsonText" rows="16" placeholder="${esc(t('import_paste'))}"
+            style="width:100%;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82rem;line-height:1.4;padding:12px;border-radius:10px;border:1.5px solid var(--border);background:var(--surface-2);color:var(--text);resize:vertical"></textarea>
+        </div>
+        <div id="importErr" class="alert alert-danger hidden"></div>
+        <div id="importOk"  class="alert alert-success hidden"></div>
+        <button class="btn btn-primary btn-full" id="importBtn" onclick="submitImport()">${ic('tray-arrow-up')} ${t('import_btn')}</button>
+      </div>
+    </div>
 
     <div class="toggle-row" id="autoTranslateRow">
       <div class="toggle-group">
@@ -151,10 +180,17 @@ function renderAdd(el) {
       </div>
     </div>`;
 
-  // ── Label pickers ──────────────────────────────────────────────────────────
-  // Inject the label picker widget into both the word and phrase containers.
-  // buildLabelPicker / toggleLabelPick / showCreateLabelInline /
-  // confirmCreateLabelInline are all defined in vocabulary.js which loads first.
+  // ── Level + label pickers ──────────────────────────────────────────────────
+  // buildLevelPicker / buildLabelPicker live in vocabulary.js (loads first).
+  const wordLevelContainer = document.getElementById('wordLevelPickerContainer');
+  if (wordLevelContainer && typeof buildLevelPicker === 'function') {
+    wordLevelContainer.innerHTML = buildLevelPicker(null, 'wordLevelPickerContainer');
+  }
+  const phraseLevelContainer = document.getElementById('phraseLevelPickerContainer');
+  if (phraseLevelContainer && typeof buildLevelPicker === 'function') {
+    phraseLevelContainer.innerHTML = buildLevelPicker(null, 'phraseLevelPickerContainer');
+  }
+
   const wordLabelContainer = document.getElementById('wordLabelPickerContainer');
   if (wordLabelContainer && typeof buildLabelPicker === 'function') {
     wordLabelContainer.innerHTML = buildLabelPicker([], 'wordLabelPickerContainer');
@@ -175,6 +211,14 @@ function renderAdd(el) {
     const chips = document.getElementById('phraseLabelPickerContainer-chips');
     if (!chips) return [];
     return [...chips.querySelectorAll('.label-pick-btn.active')].map(b => b.dataset.lid).filter(Boolean);
+  };
+  window.getAddPageSelectedLevel = function () {
+    return typeof getSelectedLevel === 'function'
+      ? getSelectedLevel('wordLevelPickerContainer-chips') : null;
+  };
+  window.getAddPagePhraseSelectedLevel = function () {
+    return typeof getSelectedLevel === 'function'
+      ? getSelectedLevel('phraseLevelPickerContainer-chips') : null;
   };
 
   // Build conjugation grids per tense
@@ -275,6 +319,22 @@ function renderAdd(el) {
       _schedulePhraseTranslate();
     });
   });
+
+  // ── JSON import: load file into textarea ───────────────────────────────────
+  const fileInput = document.getElementById('importFileInput');
+  if (fileInput) {
+    fileInput.addEventListener('change', () => {
+      const file = fileInput.files && fileInput.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const ta = document.getElementById('importJsonText');
+        if (ta) ta.value = String(reader.result || '');
+      };
+      reader.readAsText(file, 'utf-8');
+      fileInput.value = '';
+    });
+  }
 }
 
 // ── Auto-translate helpers ────────────────────────────────────────────────────
@@ -652,7 +712,92 @@ window.switchAddTab = function (tab, btn) {
   btn.classList.add('active');
   document.getElementById('tabWord').classList.toggle('hidden', tab !== 'word');
   document.getElementById('tabPhrase').classList.toggle('hidden', tab !== 'phrase');
+  const tabImport = document.getElementById('tabImport');
+  if (tabImport) tabImport.classList.toggle('hidden', tab !== 'import');
+  const autoRow = document.getElementById('autoTranslateRow');
+  if (autoRow) autoRow.classList.toggle('hidden', tab === 'import');
   _lastEditedField = null;
+};
+
+window.submitImport = async function () {
+  const lang = currentLang();
+  const errEl = document.getElementById('importErr');
+  const okEl = document.getElementById('importOk');
+  const btn = document.getElementById('importBtn');
+  errEl.classList.add('hidden');
+  okEl.classList.add('hidden');
+
+  const raw = (document.getElementById('importJsonText')?.value || '').trim();
+  if (!raw) {
+    errEl.textContent = t('import_err_empty');
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    errEl.textContent = t('import_err_json');
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  // Normalize: bare array → words[]
+  let body;
+  if (Array.isArray(data)) {
+    body = { lang, words: data };
+  } else if (data && typeof data === 'object') {
+    body = { ...data, lang: data.lang || lang };
+  } else {
+    errEl.textContent = t('import_err_json');
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  const hasWords = Array.isArray(body.words) && body.words.length;
+  const hasPhrases = Array.isArray(body.phrases) && body.phrases.length;
+  const hasTopics = (Array.isArray(body.topics) && body.topics.length) ||
+    (Array.isArray(body.labels) && body.labels.length);
+  if (!hasWords && !hasPhrases && !hasTopics) {
+    errEl.textContent = t('import_err_empty');
+    errEl.classList.remove('hidden');
+    return;
+  }
+
+  body.skipDuplicates = !!(document.getElementById('importSkipDup')?.checked);
+
+  if (btn) { btn.disabled = true; btn.style.opacity = '0.7'; }
+  try {
+    const result = await api('POST', '/api/import', body);
+    try { await loadConfig(); } catch {}
+
+    const msg = t('import_ok')
+      .replace('{words}', String(result.words?.created || 0))
+      .replace('{phrases}', String(result.phrases?.created || 0))
+      .replace('{topics}', String((result.topicsCreated || []).length))
+      .replace('{skipped}', String(
+        (result.words?.skipped || 0) + (result.phrases?.skipped || 0)
+      ));
+    _okMessage(okEl, msg);
+    okEl.classList.remove('hidden');
+
+    const errParts = [];
+    (result.words?.errors || []).forEach(e =>
+      errParts.push(`word#${e.index}: ${e.error}`));
+    (result.phrases?.errors || []).forEach(e =>
+      errParts.push(`phrase#${e.index}: ${e.error}`));
+    if (errParts.length) {
+      errEl.textContent = errParts.slice(0, 8).join('\n') +
+        (errParts.length > 8 ? `\n… +${errParts.length - 8}` : '');
+      errEl.classList.remove('hidden');
+    }
+  } catch (e) {
+    errEl.textContent = (e && (e.error || e.message)) || t('import_err');
+    errEl.classList.remove('hidden');
+  } finally {
+    if (btn) { btn.disabled = false; btn.style.opacity = ''; }
+  }
 };
 
 window.submitWord = async function () {
@@ -701,6 +846,7 @@ window.submitWord = async function () {
   }
 
   body.labels = (window.getAddPageSelectedLabels ? window.getAddPageSelectedLabels() : []);
+  body.level = (window.getAddPageSelectedLevel ? window.getAddPageSelectedLevel() : null);
 
   const btn = document.getElementById('addWordBtn');
   btn.disabled = true;
@@ -720,6 +866,8 @@ window.submitWord = async function () {
     _purgeAutoOverlays();
     _lastEditedField = null;
     document.querySelectorAll('#wordLabelPickerContainer-chips .label-pick-btn').forEach(b => { b.classList.remove('active'); b.style.background = 'transparent'; b.style.color = b.dataset.color; });
+    const wordLevelNone = document.querySelector('#wordLevelPickerContainer-chips .level-pick-btn[data-lid=""]');
+    if (wordLevelNone && typeof selectLevelPick === 'function') selectLevelPick(wordLevelNone, 'wordLevelPickerContainer-chips');
     setTimeout(() => okEl.classList.add('hidden'), 8000);
   } catch (e) {
     errEl.textContent = e.error || t('common_error'); errEl.classList.remove('hidden');
@@ -742,11 +890,12 @@ window.submitPhrase = async function () {
   }
 
   const phraseLabels = (window.getAddPagePhraseSelectedLabels ? window.getAddPagePhraseSelectedLabels() : []);
+  const phraseLevel = (window.getAddPagePhraseSelectedLevel ? window.getAddPagePhraseSelectedLevel() : null);
 
   const btn = document.getElementById('addPhraseBtn');
   btn.disabled = true;
   try {
-    await api('POST', '/api/phrases', { lang, text, translation, helpNote, labels: phraseLabels });
+    await api('POST', '/api/phrases', { lang, text, translation, helpNote, labels: phraseLabels, level: phraseLevel });
     _okMessage(okEl, t('add_ok_phrase'));
     okEl.classList.remove('hidden');
     document.getElementById('pText').value = '';
@@ -754,6 +903,8 @@ window.submitPhrase = async function () {
     document.getElementById('pNote').value = '';
     document.getElementById('pText').focus();
     document.querySelectorAll('#phraseLabelPickerContainer-chips .label-pick-btn').forEach(b => { b.classList.remove('active'); b.style.background = 'transparent'; b.style.color = b.dataset.color; });
+    const phraseLevelNone = document.querySelector('#phraseLevelPickerContainer-chips .level-pick-btn[data-lid=""]');
+    if (phraseLevelNone && typeof selectLevelPick === 'function') selectLevelPick(phraseLevelNone, 'phraseLevelPickerContainer-chips');
     setTimeout(() => okEl.classList.add('hidden'), 8000);
   } catch (e) {
     errEl.textContent = e.error || t('common_error'); errEl.classList.remove('hidden');

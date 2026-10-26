@@ -3,7 +3,7 @@ name: Feature request
 about: Suggest an idea to help us improve OpenFlashcards
 title: 'REQUEST - '
 labels: enhancement
-assignees: Liozon
+assignees: ''
 type: Feature
 
 ---
